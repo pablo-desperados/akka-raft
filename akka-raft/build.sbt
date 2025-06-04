@@ -16,5 +16,6 @@ libraryDependencies ++= Seq(
   "ch.qos.logback" % "logback-classic" % "1.5.18",
   "com.typesafe.akka" %% "akka-actor-testkit-typed" % akkaVersion.value % Test,
   "org.scalatest" %% "scalatest" % "3.2.15" % Test,
+  "com.typesafe.akka" %% "akka-http" % "10.5.3",
   "com.typesafe.akka" %% "akka-remote" % akkaVersion.value
 )

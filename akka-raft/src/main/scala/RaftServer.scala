@@ -9,10 +9,9 @@ import scala.util.Random
 
 trait RaftMessage
 case object ElectionTimeout extends RaftMessage
-
 case class UpdatePeers(peers: Map[String, ActorRef[RaftMessage]]) extends RaftMessage
-
-
+case object ShowStatus extends RaftMessage
+case class CrashNode(nodeId: String) extends RaftMessage
 object RaftServer {
 
   def apply(nodeId: String, peers: Map[String,ActorRef[RaftMessage]]): Behavior[RaftMessage] = {
@@ -44,9 +43,20 @@ object RaftServer {
           context.log.info(s"[$nodeId] Election timeout - becoming candidate")
           Behaviors.same
 
-
-        case UpdatePeers(newPeers)=>
+        case UpdatePeers(newPeers) =>
           followerBehavior(nodeId, currentTerm, votedFor, newPeers, leaderId)
+
+        case CrashNode(crashNodeId) if crashNodeId == nodeId =>
+            context.log.info(s"[$nodeId] CRASHING!")
+            Behaviors.stopped
+
+        case ShowStatus=>
+          peers.foreach{
+            case (s,_)=>
+              context.log.info(s"[$nodeId] has [$s] as a peer")
+          }
+          Behaviors.same
+
       }
     }
 
