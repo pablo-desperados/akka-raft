@@ -1,20 +1,21 @@
 package raft
-import akka.actor.ActorRef
 import akka.actor.typed.Behavior
 import akka.actor.typed.scaladsl.Behaviors
-import akka.actor.ActorRef
+import akka.actor.typed.{ActorRef, ActorSystem, Behavior}
 import akka.actor.typed.javadsl.ActorContext
+import scala.concurrent.duration.DurationInt
 
 import scala.util.Random
 
 trait RaftMessage
 case object ElectionTimeout extends RaftMessage
 
+case class UpdatePeers(peers: Map[String, ActorRef[RaftMessage]]) extends RaftMessage
 
 
 object RaftServer {
 
-  def apply(nodeId: String, peers: Set[ActorRef]): Behavior[RaftMessage] = {
+  def apply(nodeId: String, peers: Map[String,ActorRef[RaftMessage]]): Behavior[RaftMessage] = {
     Behaviors.setup { context =>
       context.log.info(s"Starting Raft node: $nodeId")
       followerBehavior(
@@ -30,7 +31,7 @@ object RaftServer {
   private def followerBehavior(nodeId: String,
                                currentTerm: Int,
                                votedFor: None.type,
-                               peers: Set[ActorRef],
+                               peers: Map[String, ActorRef[RaftMessage]],
                                leaderId: None.type
                               ): Behavior[RaftMessage] = {
     Behaviors.setup { context =>
@@ -42,6 +43,10 @@ object RaftServer {
         case ElectionTimeout =>
           context.log.info(s"[$nodeId] Election timeout - becoming candidate")
           Behaviors.same
+
+
+        case UpdatePeers(newPeers)=>
+          followerBehavior(nodeId, currentTerm, votedFor, newPeers, leaderId)
       }
     }
 
