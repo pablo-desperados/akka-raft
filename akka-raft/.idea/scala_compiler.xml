@@ -2,6 +2,6 @@
 <project version="4">
   <component name="ScalaCompilerConfiguration">
     <option name="separateProdTestSources" value="true" />
-    <profile name="sbt 1" modules="akka-raft,akka-raft.main,akka-raft.test,akka-scala-mr,akka-scala-mr.main,akka-scala-mr.test" />
+    <profile name="sbt 1" modules="akka-raft,akka-raft.main,akka-raft.test,akka-scala-mr,akka-scala-mr.main,akka-scala-mr.test,raft-implementation,raft-implementation.main,raft-implementation.test" />
   </component>
 </project>
