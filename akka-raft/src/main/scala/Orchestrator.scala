@@ -36,6 +36,30 @@ object RaftOrchestrator {
           cluster.nodes.values.foreach(_ ! ShowStatus)
           Behaviors.same
 
+        case JoinCluster(nodeId) =>
+          if (cluster.nodes.contains(nodeId)) {
+            context.log.warn(s"Node $nodeId already exists in cluster")
+          } else {
+            context.log.info(s"=== ADDING NODE: $nodeId ===")
+            // Create new node with current peers
+            val currentPeers = cluster.nodes.filter(_._1 != nodeId)
+            val newNode = context.spawn(RaftServer(nodeId, currentPeers), nodeId)
+
+            // Add to cluster
+            cluster = cluster.copy(nodes = cluster.nodes + (nodeId -> newNode))
+
+            // Update ALL nodes (including new one) with complete peer list
+            val allNodeRefs = cluster.nodes
+            cluster.nodes.foreach {
+              case (id, ref) =>
+                val assignedPeers = allNodeRefs.filter(x => x._1 != id)
+                ref ! UpdatePeers(assignedPeers)
+            }
+
+            context.log.info(s"Node $nodeId joined. Cluster nodes: ${cluster.nodes.keys.mkString(", ")}")
+          }
+          Behaviors.same
+
         case CrashNode(nodeId: String)=>
           cluster.nodes.get(nodeId) match {
             case Some(node)=>

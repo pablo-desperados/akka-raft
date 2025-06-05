@@ -13,7 +13,7 @@ object Master extends App {
   implicit val system: ActorSystem[raft.RaftMessage] = ActorSystem(RaftOrchestrator(), "raft-master")
   implicit val executionContext: ExecutionContextExecutor = system.executionContext
 
-  //CREATE ROUTES FOR HANDLING JOINING/LEAVING NETWORK REMOTELY
+  //CREATE ROUTES FOR HANDLING JOINING/LEAVINeG NETWORK REMOTELY
   val route =
     pathPrefix("raft") {
       path("join" / Segment) { nodeId =>
