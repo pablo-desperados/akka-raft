@@ -4,8 +4,9 @@ import akka.actor.typed.scaladsl.Behaviors
 import akka.actor.typed.{ActorRef, ActorSystem, Behavior}
 import akka.actor.typed.javadsl.ActorContext
 import scala.concurrent.duration.DurationInt
-
+import scala.concurrent.duration._
 import scala.util.Random
+
 
 object RaftServer {
 
@@ -23,6 +24,35 @@ object RaftServer {
   }
 
 
+  private def leaderBehavior(nodeId: String,
+                             currentTerm: Int,
+                             peers: Map[String,ActorRef[RaftMessage]]
+                            ): Behavior[RaftMessage] ={
+    Behaviors.setup{context =>
+      context.log.info(s"[$nodeId] WON ELECTION! Becoming leader for term [$currentTerm]")
+      //Send heartbeat to peers
+      peers.foreach { case (peerId, peerRef) =>
+        peerRef ! Heartbeat(currentTerm, nodeId)
+      }
+      // Schedule regular heartbeats every 100ms using the system scheduler
+      val heartbeatInterval = 100.millis
+      context.system.scheduler.scheduleAtFixedRate(
+        heartbeatInterval,
+        heartbeatInterval
+      )(() => context.self ! SendHeartbeat)(context.system.executionContext)
+      Behaviors.receiveMessage {
+        case SendHeartbeat =>
+          peers.foreach { case (peerId, peerRef) =>
+            peerRef ! Heartbeat(currentTerm, nodeId)
+          }
+          Behaviors.same
+
+        case _ =>
+          Behaviors.same
+      }
+    }
+  }
+
   private def followerBehavior(nodeId: String,
                                currentTerm: Int,
                                votedFor: Option[String],
@@ -30,7 +60,7 @@ object RaftServer {
                                leaderId: Option[String]
                               ): Behavior[RaftMessage] = {
     Behaviors.setup { context =>
-      val electionTimeout = (250.millis +  Random.nextInt(250).millis)
+      val electionTimeout = (3200.millis +  Random.nextInt(500).millis)
       context.scheduleOnce(electionTimeout, context.self, ElectionTimeout)
       context.log.info(s"[$nodeId] FOLLOWER - Term: $currentTerm, Leader: ${leaderId.getOrElse("None")}")
 
@@ -38,6 +68,16 @@ object RaftServer {
         case ElectionTimeout =>
           context.log.info(s"[$nodeId] Election timeout - becoming candidate")
           candidateBehavior(nodeId,peers, currentTerm+1)
+
+
+        case Heartbeat(term, senderId) =>
+          if (term >= currentTerm) {
+            context.log.info(s"[$nodeId] Received heartbeat from $senderId (term: $term)")
+            followerBehavior(nodeId, term, Some(senderId), peers, Some(senderId))
+
+          } else {
+            Behaviors.same
+          }
 
         case UpdatePeers(newPeers) =>
           followerBehavior(nodeId, currentTerm, votedFor, newPeers, leaderId)
@@ -51,7 +91,7 @@ object RaftServer {
           if (shouldVote) {
             context.log.info(s"[$nodeId] Voting for $candidateId in term $term")
             replyTo ! VoteResponse(term, voteGranted = true)
-            followerBehavior(nodeId, term, votedFor, peers, leaderId)
+            followerBehavior(nodeId, term, Some(candidateId), peers, Some(candidateId))
           } else {
             context.log.info(s"[$nodeId] Rejecting vote for $candidateId in term $term")
             replyTo ! VoteResponse(currentTerm, voteGranted = false)
@@ -99,8 +139,7 @@ object RaftServer {
 
               if (newVotes >= majorityNeeded) {
                 context.log.info(s"[$nodeId] 🎉 WON ELECTION! Becoming leader for term $currentTerm")
-//                leaderBehavior(nodeId, currentTerm, peers)
-                Behaviors.same
+                leaderBehavior(nodeId, currentTerm, peers)
               } else {
                 handleVotes(newVotes)
               }

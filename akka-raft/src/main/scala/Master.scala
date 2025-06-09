@@ -30,8 +30,14 @@ object Master extends App {
             system ! LeaveCluster(nodeId)
             complete(StatusCodes.OK, s"Node $nodeId leave request sent")
           }
-        } ~
-        path("heartbeat" / Segment) { nodeId =>
+        } ~ path( "promote"/Segment){nodeId =>{
+          post{
+            println("Hello")
+            complete(StatusCodes.OK, s"Node $nodeId leave request sent")
+          }
+      }
+
+      }~ path("heartbeat" / Segment) { nodeId =>
           post {
             complete(StatusCodes.OK, HttpEntity(ContentTypes.`text/plain(UTF-8)`, s"Heartbeat from '$nodeId' received"))
           }
