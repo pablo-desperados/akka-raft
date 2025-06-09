@@ -1,11 +1,12 @@
 import akka.actor.typed.ActorSystem
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.server.Directives._
-import akka.http.scaladsl.model.StatusCodes
-import raft.{RaftOrchestrator,JoinCluster,LeaveCluster,ShowStatus,CrashNode}
+import akka.http.scaladsl.model.{ContentTypes, StatusCodes,HttpEntity}
+import raft.{CrashNode, JoinCluster, LeaveCluster, RaftOrchestrator, ShowStatus}
+
 import scala.concurrent.ExecutionContextExecutor
 import scala.io.StdIn
-import scala.util.{Success, Failure}
+import scala.util.{Failure, Success}
 
 object Master extends App {
 
@@ -30,12 +31,30 @@ object Master extends App {
             complete(StatusCodes.OK, s"Node $nodeId leave request sent")
           }
         } ~
-        path("status") {
-          get {
-            system ! ShowStatus
-            complete(StatusCodes.OK, "Status request sent")
+        path("heartbeat" / Segment) { nodeId =>
+          post {
+            complete(StatusCodes.OK, HttpEntity(ContentTypes.`text/plain(UTF-8)`, s"Heartbeat from '$nodeId' received"))
           }
+
+        } ~ path("status") {
+        get {
+          system ! ShowStatus
+          complete(StatusCodes.OK, "Status request sent")
         }
+      } ~ pathEndOrSingleSlash {
+        get {
+          complete(StatusCodes.OK,
+            HttpEntity(ContentTypes.`text/plain(UTF-8)`,
+              """🚀 RAFT Cluster API
+                |""".stripMargin))
+        }
+      } ~ pathEndOrSingleSlash {
+        get {
+          complete(StatusCodes.OK,
+            HttpEntity(ContentTypes.`text/plain(UTF-8)`,
+              "🚀 RAFT Master Server Running! Visit /raft for API info"))
+        }
+      }
     }
 
   val bindingFuture = Http().newServerAt("localhost", 8080).bind(route)

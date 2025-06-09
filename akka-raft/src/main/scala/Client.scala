@@ -34,21 +34,7 @@ object Client extends App {
     sendRequest(s"heartbeat/$nodeId")
   }
 
-  def stopHeartbeat(): Unit = {
-    heartbeatScheduler.foreach(_.cancel())
-    heartbeatScheduler = None
-    println("Stopped automatic heartbeat")
-  }
 
-  def startHeartbeat(): Unit = {
-    import scala.concurrent.duration._
-    heartbeatScheduler = Some(
-      system.scheduler.scheduleAtFixedRate(3.seconds, 3.seconds) { () =>
-        sendHeartbeat()
-      }
-    )
-    println("💓 Started automatic heartbeat (every 3 seconds)")
-  }
 
   println(s"Testing connection to master at $masterHost...")
   Http().singleRequest(HttpRequest(HttpMethods.GET, uri = s"$masterUrl/raft")).onComplete {
@@ -68,6 +54,22 @@ object Client extends App {
   var running = true
   var hasJoined = false
   var heartbeatScheduler: Option[akka.actor.Cancellable] = None
+
+  def stopHeartbeat(): Unit = {
+    heartbeatScheduler.foreach(_.cancel())
+    heartbeatScheduler = None
+    println("Stopped automatic heartbeat")
+  }
+
+  def startHeartbeat(): Unit = {
+    import scala.concurrent.duration._
+    heartbeatScheduler = Some(
+      system.scheduler.scheduleAtFixedRate(3.seconds, 3.seconds) { () =>
+        sendHeartbeat()
+      }
+    )
+    println("💓 Started automatic heartbeat (every 3 seconds)")
+  }
   while (running) {
 
     val prompt = if (hasJoined) s"$nodeId@$masterHost> " else s"$nodeId (disconnected)> "
