@@ -6,6 +6,9 @@ import akka.actor.typed.scaladsl.Behaviors
 import scala.io.StdIn
 
 case class ClusterState(nodes: Map[String, ActorRef[RaftMessage]])
+case class NodeInfo(lastHeartbeat: Long, joinTime: Long)
+
+
 
 object RaftOrchestrator {
   def apply(): Behavior[RaftMessage] = {
@@ -57,6 +60,24 @@ object RaftOrchestrator {
             }
 
             context.log.info(s"Node $nodeId joined. Cluster nodes: ${cluster.nodes.keys.mkString(", ")}")
+          }
+          Behaviors.same
+
+        case LeaveCluster(nodeId) =>
+          cluster.nodes.get(nodeId) match {
+            case Some(nodeRef) =>
+              context.log.info(s"=== REMOVING NODE: $nodeId ===")
+              context.stop(nodeRef)
+              cluster = cluster.copy(nodes = cluster.nodes - nodeId)
+              val updatedNodeRefs = cluster.nodes
+              cluster.nodes.foreach {
+                case (id, ref) =>
+                  val assignedPeers = updatedNodeRefs.filter(x => x._1 != id)
+                  ref ! UpdatePeers(assignedPeers)
+              }
+              context.log.info(s"Node $nodeId left. Remaining nodes: ${cluster.nodes.keys.mkString(", ")}")
+            case None =>
+              context.log.info(s"Cannot remove node $nodeId - node not found")
           }
           Behaviors.same
 

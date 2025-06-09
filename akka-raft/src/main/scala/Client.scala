@@ -68,7 +68,7 @@ object Client extends App {
         sendHeartbeat()
       }
     )
-    println("💓 Started automatic heartbeat (every 3 seconds)")
+    println("Started automatic heartbeat (every 3 seconds)")
   }
   while (running) {
 
