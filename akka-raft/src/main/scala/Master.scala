@@ -2,7 +2,8 @@ import akka.actor.typed.ActorSystem
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.server.Directives._
 import akka.http.scaladsl.model.{ContentTypes, HttpEntity, StatusCodes}
-import raft.{CrashNode, JoinCluster, LeaveCluster, RaftOrchestrator, ShowStatus}
+import akka.util.Timeout
+import raft.{ClientCommand, ClientResponse, CrashNode, GetCurrentLeader, JoinCluster, LeaveCluster, RaftOrchestrator, ShowStatus, SubmitCommand, ShowLogs}
 
 import scala.concurrent.ExecutionContextExecutor
 import scala.io.StdIn
@@ -29,8 +30,21 @@ object Master extends App {
           system ! JoinCluster(nodeId)
           complete(StatusCodes.OK, s"Node $nodeId join request sent")
         }
-      } ~
-        path("leave" / Segment) { nodeId =>
+      }~ path("command") {
+          post {
+            entity(as[String]) { command =>
+              println(s"Received command: '$command'")
+              system ! SubmitCommand(command)
+              complete(StatusCodes.OK, s"✅ Command '$command' submitted to cluster")
+            }
+          }
+        }~ path("logs") {
+        get {
+          println("📊 [HTTP] Log visualization requested")
+          system ! ShowLogs()
+          complete(StatusCodes.OK, "📊 Log visualization sent to console")
+        }
+      }~ path("leave" / Segment) { nodeId =>
           post {
             println(s"[REMOTE] Node $nodeId requesting to leave")
             nodeHeartbeats.remove(nodeId)
@@ -102,9 +116,9 @@ object Master extends App {
   val bindingFuture = Http().newServerAt("localhost", 8080).bind(route)
   bindingFuture.onComplete {
     case Success(binding) =>
-      println(s"🚀 RAFT MASTER SERVER STARTED")
-      println(s"📡 HTTP API running at: http://localhost:8080")
-      println(s"💻 Master Console ready")
+      println(s"~~~RAFT MASTER SERVER STARTED~~~")
+      println(s"~~~HTTP API running at: http://localhost:8080~~~")
+      println(s"~~~Master Console ready~~~")
     case Failure(exception) =>
       println(s"Failed to start HTTP server: $exception")
       system.terminate()
@@ -115,6 +129,7 @@ object Master extends App {
   println("  join <nodeId> - Add node to cluster")
   println("  leave <nodeId> - Remove node from cluster")
   println("  crash <nodeId> - Crash a node")
+  println("  command <text> - Submit command to leader")
   println("  quit - Exit")
   var running = true
   while (running) {
@@ -125,8 +140,17 @@ object Master extends App {
       case Some("status") =>
         system ! ShowStatus
 
+      case Some("command") if input.length > 1 =>
+        val command = input.drop(1).mkString(" ")
+        println(s"Submitting command: '$command'")
+        system ! SubmitCommand(command)
+
       case Some("quit") =>
         running = false
+
+      case Some("logs") =>
+        println("Requesting log visualization...")
+        system ! ShowLogs()
 
       case Some("crash") if input.length > 1 =>
         val nodeId = input(1)

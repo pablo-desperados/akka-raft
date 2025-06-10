@@ -14,6 +14,10 @@ case object SendHeartbeat extends RaftMessage
 case class Heartbeat(term: Int, leaderId: String) extends RaftMessage
 case class LogEntry(term: Int, index: Int, command: String)
 case class AppendEntries(term: Int, leaderId: String, prevLogIndex: Int, prevLogTerm: Int, entries: List[LogEntry], leaderCommit: Int, replyTo: ActorRef[AppendEntriesResponse] ) extends RaftMessage
+case class SubmitCommand(command: String) extends RaftMessage
 case class AppendEntriesResponse(term: Int, success: Boolean, matchIndex: Int) extends RaftMessage
 case class ClientCommand(command: String, replyTo: ActorRef[ClientResponse]) extends RaftMessage
 case class ClientResponse(success: Boolean, leaderId: Option[String]) extends RaftMessage
+case class GetLogState(replyTo: ActorRef[LogStateResponse]) extends RaftMessage
+case class LogStateResponse(nodeId: String,log: List[LogEntry],commitIndex: Int,lastApplied: Int,currentTerm: Int,state: String  ) extends RaftMessage
+case class ShowLogs() extends RaftMessage

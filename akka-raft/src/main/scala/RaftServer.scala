@@ -10,6 +10,14 @@ import scala.util.Random
 
 
 object RaftServer {
+  case class DemoConfig(
+                         enableDetailedLogs: Boolean = false,
+                         heartbeatInterval: FiniteDuration = 2.seconds,
+                         electionTimeoutBase: FiniteDuration = 5.seconds,
+                         commandDelay: FiniteDuration = 1.second
+                       )
+
+  val demoConfig = DemoConfig()
 
   def apply(nodeId: String, peers: Map[String,ActorRef[RaftMessage]]): Behavior[RaftMessage] = {
     Behaviors.withTimers { timers =>
@@ -49,13 +57,18 @@ object RaftServer {
                                timers: akka.actor.typed.scaladsl.TimerScheduler[RaftMessage]
                               ): Behavior[RaftMessage] = {
     Behaviors.setup { context =>
-      val electionTimeout = (3200.millis + Random.nextInt(500).millis)
+
+      val electionTimeout = demoConfig.electionTimeoutBase + Random.nextInt(2000).millis
       timers.startTimerWithFixedDelay("election-timeout", ElectionTimeout, electionTimeout)
 
       Behaviors.receiveMessage[RaftMessage]{
+        case GetLogState(replyTo) =>
+          replyTo ! LogStateResponse(nodeId, log, commitIndex, lastApplied, currentTerm, "FOLLOWER") // Change state accordingly
+          Behaviors.same
         case ElectionTimeout =>
           context.log.info(s"[$nodeId] Election timeout - becoming candidate")
           // Cancel election timer before becoming candidate
+          Thread.sleep(demoConfig.commandDelay.toMillis)
           timers.cancel("election-timeout")
           candidateBehavior(nodeId, peers, currentTerm + 1, log, commitIndex, lastApplied, timers)
 
@@ -63,7 +76,7 @@ object RaftServer {
           if (term >= currentTerm) {
 
             timers.cancel("election-timeout")
-            val newElectionTimeout = (3200.millis + Random.nextInt(500).millis)
+            val newElectionTimeout = demoConfig.electionTimeoutBase + Random.nextInt(2000).millis
             timers.startTimerWithFixedDelay("election-timeout", ElectionTimeout, newElectionTimeout)
             followerBehavior(nodeId, term, votedFor, peers, Some(senderId), log, commitIndex, lastApplied, timers)
           } else {
@@ -121,6 +134,8 @@ object RaftServer {
               // Phase 1: Basic append without complex consistency checking
               val newLog = if (entries.nonEmpty) {
                 context.log.info(s"[$nodeId] Appending ${entries.size} entries from leader $leaderId")
+                entries.foreach(entry => println(s"   └─ Entry ${entry.index}: '${entry.command}' (term ${entry.term})"))
+                Thread.sleep(demoConfig.commandDelay.toMillis)
                 log ++ entries
               } else {
                 context.log.debug(s"[$nodeId] Received heartbeat from leader $leaderId")
@@ -175,8 +190,13 @@ object RaftServer {
       val electionTimeout = (250.millis + Random.nextInt(250).millis)
       timers.startTimerWithFixedDelay("election-timeout", ElectionTimeout, electionTimeout)
 
+
+
       def handleVotes(votes: Int): Behavior[RaftMessage] = {
         Behaviors.receiveMessage {
+          case GetLogState(replyTo) =>
+            replyTo ! LogStateResponse(nodeId, log, commitIndex, lastApplied, currentTerm, "FOLLOWER")
+            Behaviors.same
           case VoteResponse(term, voteGranted) =>
             if (term > currentTerm) {
               context.log.info(s"[$nodeId] Higher term discovered: $term, becoming follower")
@@ -189,6 +209,7 @@ object RaftServer {
               if (newVotes >= majorityNeeded) {
                 context.log.info(s"[$nodeId]  WON ELECTION! Becoming leader for term $currentTerm")
                 timers.cancel("election-timeout")
+                Thread.sleep(demoConfig.commandDelay.toMillis)
                 leaderBehavior(nodeId, currentTerm, peers, log, commitIndex, lastApplied, timers)
               } else {
                 handleVotes(newVotes)
@@ -202,6 +223,7 @@ object RaftServer {
               context.log.info(s"[$nodeId] Valid leader $leaderId discovered during election, stepping down")
               replyTo ! AppendEntriesResponse(term, success = true, lastLogIndex(log))
               timers.cancel("election-timeout")
+              Thread.sleep(demoConfig.commandDelay.toMillis)
               followerBehavior(nodeId, term, None, peers, Some(leaderId), log, commitIndex, lastApplied, timers)
             } else {
               context.log.info(s"[$nodeId] Rejecting AppendEntries from $leaderId (lower term: $term)")
@@ -217,7 +239,9 @@ object RaftServer {
             if (term > currentTerm) {
               context.log.info(s"[$nodeId] Higher term discovered: $term, becoming follower and voting for $candidateId")
               replyTo ! VoteResponse(term, voteGranted = true)
+              Thread.sleep(demoConfig.commandDelay.toMillis)
               timers.cancel("election-timeout")
+              Thread.sleep(demoConfig.commandDelay.toMillis)
               followerBehavior(nodeId, term, Some(candidateId), peers, None, log, commitIndex, lastApplied, timers)
             } else {
               context.log.info(s"[$nodeId] Rejecting vote request from $candidateId (I'm candidate for term $currentTerm)")
@@ -230,8 +254,12 @@ object RaftServer {
             candidateBehavior(nodeId, newPeers, currentTerm, log, commitIndex, lastApplied, timers)
 
           case ShowStatus =>
-            context.log.info(s"[$nodeId] STATUS: CANDIDATE, Term: $currentTerm, Votes: $votes/$majorityNeeded")
-            context.log.info(s"[$nodeId] Log: ${log.size} entries, commitIndex: $commitIndex")
+            if (log.nonEmpty) {
+              println(s"Recent entries:")
+              log.takeRight(3).foreach { entry =>
+                println(s"      [${entry.index}] '${entry.command}' (term ${entry.term})")
+              }
+            }
             Behaviors.same
 
           case CrashNode(crashNodeId) if crashNodeId == nodeId =>
@@ -250,7 +278,6 @@ object RaftServer {
   private def leaderBehavior(nodeId: String,
                              currentTerm: Int,
                              peers: Map[String, ActorRef[RaftMessage]],
-                             // ⭐ NEW: Added log replication parameters
                              log: List[LogEntry],
                              commitIndex: Int,
                              lastApplied: Int,
@@ -259,26 +286,22 @@ object RaftServer {
     Behaviors.setup { context =>
       context.log.info(s"[$nodeId] LEADER - Term $currentTerm, managing ${peers.size} followers")
 
-      // ⭐ NEW: Initialize leader-specific state for log replication
       var nextIndex: Map[String, Int] = peers.keys.map(peerId => peerId -> (lastLogIndex(log) + 1)).toMap
       var matchIndex: Map[String, Int] = peers.keys.map(peerId => peerId -> 0).toMap
 
-      // ⭐ MODIFIED: Send initial AppendEntries instead of simple heartbeat
       peers.foreach { case (peerId, peerRef) =>
         val prevLogIndex = nextIndex.getOrElse(peerId, 1) - 1
         val prevLogTerm = getPrevLogTerm(log, prevLogIndex)
         peerRef ! AppendEntries(currentTerm, nodeId, prevLogIndex, prevLogTerm, List.empty, commitIndex, context.self)
       }
 
-      val heartbeatInterval = 100.millis
-      timers.startTimerWithFixedDelay("heartbeat", SendHeartbeat, heartbeatInterval)
+      timers.startTimerWithFixedDelay("heartbeat", SendHeartbeat, demoConfig.heartbeatInterval)
 
       def handleLeaderMessages(currentLog: List[LogEntry],
                                currentCommitIndex: Int,
                                currentNextIndex: Map[String, Int],
                                currentMatchIndex: Map[String, Int]): Behavior[RaftMessage] = {
         Behaviors.receiveMessage {
-          // ⭐ MODIFIED: Send AppendEntries instead of simple heartbeats
           case SendHeartbeat =>
             peers.foreach { case (peerId, peerRef) =>
               val prevLogIndex = currentNextIndex.getOrElse(peerId, 1) - 1
@@ -287,8 +310,10 @@ object RaftServer {
             }
             context.log.debug(s"[$nodeId] Sent heartbeats (AppendEntries) to ${peers.size} followers")
             Behaviors.same
+          case GetLogState(replyTo) =>
+            replyTo ! LogStateResponse(nodeId, log, commitIndex, lastApplied, currentTerm, "LEADER") // Change state accordingly
+            Behaviors.same
 
-          // ⭐ NEW: Handle client commands and replicate to followers
           case ClientCommand(command, replyTo) =>
             context.log.info(s"[$nodeId] Received client command: $command")
 
@@ -318,12 +343,10 @@ object RaftServer {
               )
             }
 
-            // ⭐ Phase 1: Immediately respond success (later phases will wait for majority)
             replyTo ! ClientResponse(success = true, leaderId = Some(nodeId))
 
             handleLeaderMessages(newLog, currentCommitIndex, currentNextIndex, currentMatchIndex)
 
-          // ⭐ NEW: Handle AppendEntries responses from followers
           case AppendEntriesResponse(term, success, matchIndexValue) =>
             if (term > currentTerm) {
               context.log.info(s"[$nodeId] Higher term discovered: $term, stepping down")
@@ -331,11 +354,9 @@ object RaftServer {
               followerBehavior(nodeId, term, None, peers, None, currentLog, currentCommitIndex, lastApplied, timers)
             } else if (success) {
               context.log.debug(s"[$nodeId] Received successful AppendEntries response, matchIndex: $matchIndexValue")
-              // ⭐ Phase 1: Basic success handling (Phase 2 will track individual follower progress)
               Behaviors.same
             } else {
               context.log.info(s"[$nodeId] Received failed AppendEntries response - will retry in next heartbeat")
-              // ⭐ Phase 1: Simple retry (Phase 2 will implement proper backoff)
               Behaviors.same
             }
 
@@ -364,7 +385,6 @@ object RaftServer {
           case UpdatePeers(newPeers) =>
             context.log.info(s"[$nodeId] Leader updated peers: ${newPeers.size} followers")
 
-            // ⭐ NEW: Update nextIndex and matchIndex for new peers
             val newNextIndex = newPeers.keys.map(peerId => peerId -> (lastLogIndex(currentLog) + 1)).toMap
             val newMatchIndex = newPeers.keys.map(peerId => peerId -> 0).toMap
 
@@ -373,10 +393,12 @@ object RaftServer {
 
           case ShowStatus =>
             context.log.info(s"[$nodeId] STATUS: LEADER, Term: $currentTerm, Followers: ${peers.size}")
-            // ⭐ NEW: Show log replication status
             context.log.info(s"[$nodeId] Log: ${currentLog.size} entries, commitIndex: $currentCommitIndex, lastApplied: $lastApplied")
-            currentLog.takeRight(3).foreach { entry =>
-              context.log.info(s"[$nodeId] Recent entry [${entry.index}]: ${entry.command} (term ${entry.term})")
+            if (currentLog.nonEmpty) {
+              println(s"   📋 Recent entries:")
+              currentLog.takeRight(3).foreach { entry =>
+                println(s"      [${entry.index}] '${entry.command}' (term ${entry.term})")
+              }
             }
             Behaviors.same
 
