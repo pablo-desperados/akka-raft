@@ -35,14 +35,14 @@ object Master extends App {
             entity(as[String]) { command =>
               println(s"Received command: '$command'")
               system ! SubmitCommand(command)
-              complete(StatusCodes.OK, s"✅ Command '$command' submitted to cluster")
+              complete(StatusCodes.OK, s"Command '$command' submitted to cluster")
             }
           }
         }~ path("logs") {
         get {
-          println("📊 [HTTP] Log visualization requested")
+          println("[HTTP] Log visualization requested")
           system ! ShowLogs()
-          complete(StatusCodes.OK, "📊 Log visualization sent to console")
+          complete(StatusCodes.OK, "Log visualization sent to console")
         }
       }~ path("leave" / Segment) { nodeId =>
           post {
